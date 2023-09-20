@@ -15,8 +15,10 @@ import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Environment;
 import android.provider.MediaStore;
 import android.view.View;
+import android.widget.ImageView;
 import android.widget.Toast;
 
 import com.google.android.gms.tasks.OnFailureListener;
@@ -32,6 +34,12 @@ import com.google.firebase.storage.StorageReference;
 import com.google.firebase.storage.UploadTask;
 import com.ozanyazici.javainstagramclone.databinding.ActivityUploadBinding;
 
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.UUID;
 
@@ -43,10 +51,15 @@ public class UploadActivity extends AppCompatActivity {
     private FirebaseFirestore firebaseFirestore;
     private StorageReference storageReference;
     Uri imageData;
+    Uri savedImageUri;
     ActivityResultLauncher<Intent> activityResultLauncher;
     ActivityResultLauncher<String> permissionLauncher;
+    ActivityResultLauncher<String> permissionLauncherCamera;
+    ActivityResultLauncher<Intent> activityResultLauncherCamera;
     private ActivityUploadBinding binding;
     Bitmap selectedImage;
+    private static final int REQUEST_CAMERA_PERMISSION_CODE = 1;
+    private static final int REQUEST_IMAGE_CAPTURE = 2;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -149,7 +162,31 @@ public class UploadActivity extends AppCompatActivity {
         }
 
     }
-    
+
+    public void cameraButtonClicked (View view) {
+
+        if(ContextCompat.checkSelfPermission(this,Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED){
+            if(ActivityCompat.shouldShowRequestPermissionRationale(this,Manifest.permission.CAMERA)) {
+                Snackbar.make(view, "Permission needed for gallery",Snackbar.LENGTH_INDEFINITE).setAction("Give permission", new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        //ask permission
+                        permissionLauncherCamera.launch(Manifest.permission.CAMERA);
+                    }
+                }).show();
+
+            } else {
+                //ask permission
+                permissionLauncherCamera.launch(Manifest.permission.CAMERA);
+            }
+
+        } else {
+            Intent intentToCamera = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+            activityResultLauncherCamera.launch(intentToCamera);
+        }
+
+    }
+
     private void registerLauncher() {
 
         activityResultLauncher = registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), new ActivityResultCallback<ActivityResult>() {
@@ -157,7 +194,7 @@ public class UploadActivity extends AppCompatActivity {
             public void onActivityResult(ActivityResult result) {
                 if (result.getResultCode() == RESULT_OK) {
                     Intent intentFromResult = result.getData();
-                    if(intentFromResult != null) {
+                    if (intentFromResult != null) {
                         imageData = intentFromResult.getData();
                         binding.imageView.setImageURI(imageData);
 
@@ -178,16 +215,35 @@ public class UploadActivity extends AppCompatActivity {
                             e.printStackTrace();
 
                         }*/
+
                     }
                 }
             }
         });
+
+        activityResultLauncherCamera = registerForActivityResult(new ActivityResultContracts.StartActivityForResult(),
+                new ActivityResultCallback<ActivityResult>() {
+                    @Override
+                    public void onActivityResult(ActivityResult result) {
+                        if (result.getResultCode() == RESULT_OK) {
+                            // Çekilen fotoğrafın URI'sini al
+                            Uri imageUri = saveImage(result.getData());
+
+                            if (imageUri != null) {
+                                // Kaydedilen fotoğrafın URI'sini imageview'da göster
+                                imageData = imageUri;
+                                binding.imageView.setImageURI(imageData);
+                            }
+                        }
+                    }
+                });
 
         permissionLauncher = registerForActivityResult(new ActivityResultContracts.RequestPermission(), new ActivityResultCallback<Boolean>() {
             @Override
             public void onActivityResult(Boolean result) {
                 if(result) {
                     Intent intentToGallery = new Intent(Intent.ACTION_PICK,MediaStore.Images.Media.EXTERNAL_CONTENT_URI);
+                    intentToGallery.putExtra("info","gallery");
                     activityResultLauncher.launch(intentToGallery);
 
                 } else {
@@ -196,6 +252,54 @@ public class UploadActivity extends AppCompatActivity {
             }
         });
 
+        permissionLauncherCamera = registerForActivityResult(new ActivityResultContracts.RequestPermission(), new ActivityResultCallback<Boolean>() {
+            @Override
+            public void onActivityResult(Boolean result) {
+                if(result) {
+                    Intent intentToCamera = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+                    intentToCamera.putExtra("info","camera");
+                    activityResultLauncherCamera.launch(intentToCamera);
+                } else {
+                    Toast.makeText(UploadActivity.this, "Permission needed", Toast.LENGTH_LONG).show();
+                }
+            }
+        });
+
     }
 
-}
+    private Uri saveImage(Intent data) {
+        Bundle extras = data.getExtras();
+        Bitmap imageBitmap = (Bitmap) extras.get("data");
+
+        // Fotoğrafı cihaza kaydetmek için bir dosya oluştur
+        File imageFile = createImageFile();
+
+        try {
+            // Bitmap'i dosyaya kaydet
+            OutputStream outputStream = new FileOutputStream(imageFile);
+            imageBitmap.compress(Bitmap.CompressFormat.JPEG, 100, outputStream);
+            outputStream.close();
+        } catch (IOException e) {
+            e.printStackTrace();
+            return null;
+        }
+
+        // Dosyanın URI'sini döndür
+        return Uri.fromFile(imageFile);
+    }
+
+    // Dosya yolu oluştur
+    private File createImageFile() {
+        String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss").format(new Date());
+        String imageFileName = "JPEG_" + timeStamp + "_";
+        File storageDir = getExternalFilesDir(Environment.DIRECTORY_DCIM);
+        try {
+            File imageFile = File.createTempFile(imageFileName, ".jpg", storageDir);
+            return imageFile;
+        } catch (IOException e) {
+            e.printStackTrace();
+            return null;
+        }
+    }
+ }
+
